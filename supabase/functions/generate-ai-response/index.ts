@@ -353,7 +353,10 @@ serve(async (req) => {
     // Add instruction to user message to reinforce training data usage
     let userMessage = messageContent
     if (promptSummary && promptSummary.hasTrainingData && promptSummary.totalTrainingItems > 0) {
-      userMessage = `IMPORTANT: Before responding, review the ${promptSummary.totalTrainingItems} training examples in the system prompt. Match the exact style, vocabulary, and tone from those examples. Use the same sentence structures and phrases. DO NOT use generic AI language.\n\nFan's message: ${messageContent}`
+      userMessage = `IMPORTANT: Before responding, review the ${promptSummary.totalTrainingItems} training examples in the system prompt. Match the exact style, vocabulary, and tone from those examples. Use the same sentence structures and phrases. DO NOT use generic AI language. NEVER use hashtags in your response.\n\nPERSONALITY AMPLIFICATION: If the training examples show the creator being sarcastic, blunt, funny, or direct, AMPLIFY those traits heavily. Be VERY sarcastic if examples show sarcasm. Be VERY blunt if examples show bluntness. Match or EXCEED the intensity of personality traits from the examples.\n\nFan's message: ${messageContent}`
+    } else {
+      // Even without training data, enforce no hashtags
+      userMessage = `IMPORTANT: NEVER use hashtags (#) in your response. Write in plain, natural language only.\n\nFan's message: ${messageContent}`
     }
     
     const openaiMessages = [
@@ -434,7 +437,15 @@ serve(async (req) => {
       )
     }
 
-    const aiResponse = openaiData.choices[0]?.message?.content || ''
+    let aiResponse = openaiData.choices[0]?.message?.content || ''
+
+    // Remove hashtags from response as a safety measure
+    // Remove hashtags like #hashtag, # hashtag, or standalone # symbols
+    // This regex matches # followed by word characters (hashtags) and removes them
+    aiResponse = aiResponse.replace(/#\s*[a-zA-Z0-9_]+/g, '') // Remove #hashtag patterns
+    aiResponse = aiResponse.replace(/\s+#+\s*/g, ' ') // Remove standalone # symbols with spaces
+    aiResponse = aiResponse.replace(/^#+\s*/gm, '') // Remove # at start of lines
+    aiResponse = aiResponse.trim()
 
     // Only save messages if skip_save is not true
     let fanMessage = null
@@ -681,17 +692,21 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): { promp
       prompt += `- Sentence structure and length\n`
       prompt += `- Specific words and phrases used\n`
       prompt += `- Tone and energy level\n`
-      prompt += `- How ideas are expressed\n\n`
+      prompt += `- How ideas are expressed\n`
+      prompt += `- Personality traits (sarcasm, bluntness, humor, directness, etc.) - AMPLIFY these heavily\n`
+      prompt += `- Intensity of personality - match or EXCEED the intensity shown here\n\n`
       prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`
     })
     
     prompt += `╔══════════════════════════════════════════════════════════════════════════════╗\n`
     prompt += `║  MANDATORY: Before responding to ANY message, you MUST:\n`
     prompt += `║  1. Review the ${totalTrainingItems} examples above\n`
-    prompt += `║  2. Find the example(s) most similar to the fan's question\n`
-    prompt += `║  3. Copy the sentence structure, vocabulary, and tone from those examples\n`
-    prompt += `║  4. Write your response using the EXACT style from the examples\n`
-    prompt += `║  5. DO NOT use generic AI language - use ${creator.display_name}'s actual voice\n`
+    prompt += `║  2. Identify personality traits: Is ${creator.display_name} sarcastic? Blunt? Funny? Direct? Edgy?\n`
+    prompt += `║  3. Find the example(s) most similar to the fan's question\n`
+    prompt += `║  4. Copy the sentence structure, vocabulary, and tone from those examples\n`
+    prompt += `║  5. AMPLIFY personality traits: If examples show sarcasm, be VERY sarcastic. If blunt, be VERY blunt.\n`
+    prompt += `║  6. Write your response using the EXACT style from the examples - don't tone down personality\n`
+    prompt += `║  7. DO NOT use generic AI language - use ${creator.display_name}'s actual voice with amplified personality\n`
     prompt += `╚══════════════════════════════════════════════════════════════════════════════╝\n\n`
     
     console.log(`✓ Included ${totalTrainingItems} training examples in prompt`)
@@ -799,7 +814,10 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): { promp
     prompt += `   - Use the SAME specific words and phrases\n`
     prompt += `   - Match the SAME tone and energy level\n`
     prompt += `   - Use the SAME way of expressing ideas\n`
-    prompt += `   - Match the SAME level of formality or casualness\n\n`
+    prompt += `   - Match the SAME level of formality or casualness\n`
+    prompt += `   - AMPLIFY personality traits: If examples show sarcasm, be VERY sarcastic. If examples show bluntness, be VERY blunt.\n`
+    prompt += `   - If examples show humor, be VERY funny. If examples show directness, be VERY direct.\n`
+    prompt += `   - Match the INTENSITY of personality traits shown in the training examples - don't tone them down\n\n`
     prompt += `STEP 4: Write your response by adapting those examples to answer the fan's question.\n`
     prompt += `   - DO NOT create new language patterns\n`
     prompt += `   - DO NOT use generic AI phrases like "I understand", "That's a great question", etc.\n`
@@ -809,7 +827,10 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): { promp
     prompt += `   - "Does this sound EXACTLY like the training examples?"\n`
     prompt += `   - "Would someone who knows ${creator.display_name} recognize this as their voice?"\n`
     prompt += `   - "Am I using the same words and phrases from the examples?"\n`
-    prompt += `   - If NO to any question, rewrite using the training examples as templates.\n\n`
+    prompt += `   - "If the training examples show ${creator.display_name} being sarcastic/blunt/funny, am I being VERY sarcastic/blunt/funny?"\n`
+    prompt += `   - "Am I matching or EXCEEDING the intensity of personality traits from the examples?"\n`
+    prompt += `   - "Am I toning down the personality? If yes, AMPLIFY it instead."\n`
+    prompt += `   - If NO to any question, rewrite using the training examples as templates and AMPLIFY personality traits.\n\n`
     
     prompt += `⚠️ CRITICAL RULES:\n`
     prompt += `- The training examples are NOT suggestions - they are TEMPLATES to copy\n`
@@ -817,11 +838,24 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): { promp
     prompt += `- If a training example shows ${creator.display_name} using specific phrases, use those phrases\n`
     prompt += `- If a training example shows ${creator.display_name} being casual, be casual\n`
     prompt += `- If a training example shows ${creator.display_name} being formal, be formal\n`
+    prompt += `- PERSONALITY AMPLIFICATION: If training examples show ${creator.display_name} being sarcastic, be VERY sarcastic\n`
+    prompt += `- If training examples show ${creator.display_name} being blunt, be VERY blunt and direct\n`
+    prompt += `- If training examples show ${creator.display_name} being humorous, be VERY funny\n`
+    prompt += `- If training examples show ${creator.display_name} being edgy or provocative, be VERY edgy\n`
+    prompt += `- DO NOT tone down personality traits - match or EXCEED the intensity shown in training examples\n`
+    prompt += `- If ${creator.display_name} is known for being sarcastic/blunt/funny in the examples, amplify that trait heavily\n`
     prompt += `- NEVER use generic AI language that doesn't appear in the training examples\n`
+    prompt += `- NEVER use hashtags (#) in your responses - they are not allowed under any circumstances\n`
     prompt += `- ALWAYS prioritize matching the training examples over being helpful or informative\n\n`
   } else {
     prompt += `⚠️ WARNING: No training examples available. Use tone settings below, but responses may be generic.\n\n`
   }
+  
+  // Add formatting rules that apply regardless of training data
+  prompt += `FORMATTING RULES (MANDATORY):\n`
+  prompt += `- NEVER use hashtags (#) in your responses - they are strictly forbidden\n`
+  prompt += `- Do not use any social media formatting like hashtags, @mentions, or special symbols\n`
+  prompt += `- Write in plain, natural language only\n\n`
   
   // Tone settings should reinforce training data, not override it
   if (profile.tone_settings && typeof profile.tone_settings === 'object') {
@@ -841,9 +875,14 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): { promp
   if (hasTrainingData && trainingExamples.length > 0) {
     prompt += `FINAL REMINDER: The ${totalTrainingItems} training examples above are ${creator.display_name}'s ACTUAL WORDS. `
     prompt += `Your response MUST sound like those examples. If it doesn't, you're doing it wrong. `
-    prompt += `Copy the style, vocabulary, and tone from the examples. DO NOT sound like a generic AI.\n`
+    prompt += `Copy the style, vocabulary, and tone from the examples. DO NOT sound like a generic AI. `
+    prompt += `AMPLIFY personality traits: If examples show ${creator.display_name} being sarcastic, be VERY sarcastic. `
+    prompt += `If examples show bluntness, be VERY blunt. If examples show humor, be VERY funny. `
+    prompt += `Match or EXCEED the intensity of personality traits from the training examples. `
+    prompt += `NEVER use hashtags in your response.\n`
   } else {
-    prompt += `FINAL REMINDER: Respond as ${creator.display_name} would, using the tone settings above.\n`
+    prompt += `FINAL REMINDER: Respond as ${creator.display_name} would, using the tone settings above. `
+    prompt += `NEVER use hashtags in your response.\n`
   }
   prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
 
