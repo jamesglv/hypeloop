@@ -13,6 +13,7 @@ import TrainBrain from './pages/TrainBrain'
 import Subscribers from './pages/Subscribers'
 import Earnings from './pages/Earnings'
 import Settings from './pages/Settings'
+import Messages from './pages/Messages'
 
 function App() {
   return (
@@ -90,6 +91,17 @@ function App() {
               <ProtectedRoute requireProfileComplete={true}>
                 <Layout>
                   <Settings />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/messages"
+            element={
+              <ProtectedRoute requireProfileComplete={true}>
+                <Layout>
+                  <Messages />
                 </Layout>
               </ProtectedRoute>
             }

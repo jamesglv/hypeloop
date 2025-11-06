@@ -44,7 +44,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     <div className="w-[200px] bg-card border-r border-border h-screen flex flex-col fixed left-0 top-0 z-20">
       {/* Logo */}
       <div className="px-6 py-6">
-        <h3 className="text-[#7C3AED] font-medium">Creator Chat</h3>
+        <img src="/chatpasslogo.png" alt="Chat Pass" className="h-8 w-auto" />
       </div>
 
       {/* Navigation Items */}

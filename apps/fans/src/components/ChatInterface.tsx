@@ -141,7 +141,12 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
           (payload) => {
             const newMessage = payload.new as Message;
             if (newMessage.fan_id === user?.id || newMessage.role === 'ai') {
-              setMessages((prev) => [...prev, newMessage]);
+              setMessages((prev) => {
+                // Check if message already exists to prevent duplicates
+                const exists = prev.some(msg => msg.id === newMessage.id);
+                if (exists) return prev;
+                return [...prev, newMessage];
+              });
             }
           }
         )
@@ -217,30 +222,8 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
     setLoading(true);
 
     try {
-      // Insert fan message
-      const { data: newMessage, error: messageError } = await supabase
-        .from('messages')
-        .insert({
-          fan_id: user.id,
-          creator_id: activeCreatorId,
-          subscription_id: subscriptionId,
-          content: messageContent,
-          role: 'fan',
-        })
-        .select()
-        .single();
-
-      if (messageError) {
-        console.error('Error sending message:', messageError);
-        setLoading(false);
-        return;
-      }
-
-      if (newMessage) {
-        setMessages((prev) => [...prev, newMessage as Message]);
-      }
-
       // Call edge function to generate AI response
+      // The edge function will insert both the fan message and AI response
       const { error: aiError } = await supabase.functions.invoke(
         'generate-ai-response',
         {
@@ -249,21 +232,23 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
             creator_id: activeCreatorId,
             subscription_id: subscriptionId,
             message_content: messageContent,
+            skip_save: false, // Explicitly set to false to ensure messages are saved
           },
         }
       );
 
       if (aiError) {
         console.error('Error generating AI response:', aiError);
+        // Restore message on error
+        setInputValue(messageContent);
       }
 
-      // Refresh messages to get AI response
-      setTimeout(() => {
-        fetchMessages();
-        setLoading(false);
-      }, 1000);
+      // Don't need to refresh - realtime subscription will handle new messages
+      setLoading(false);
     } catch (error) {
       console.error('Error sending message:', error);
+      // Restore message on error
+      setInputValue(messageContent);
       setLoading(false);
     }
   };
@@ -294,14 +279,6 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
       onSelectCreator(creator);
     }
   };
-
-  if (!activeCreator) {
-    return (
-      <div className="h-screen flex items-center justify-center bg-background text-muted-foreground">
-        <p>Select a creator to start chatting</p>
-      </div>
-    );
-  }
 
   return (
     <div className="h-screen flex bg-background">
@@ -365,115 +342,118 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
 
       {/* Main Chat Area */}
       <div className="flex-1 flex flex-col">
-        {/* Top Bar */}
-        <div className="bg-card border-b border-border px-6 py-4 flex items-center gap-3">
-          <img
-            src={activeCreator.avatar}
-            alt={activeCreator.name}
-            className="w-10 h-10 rounded-full object-cover"
-          />
-          
-          <div className="flex-1 min-w-0">
-            <div className="text-foreground font-medium">{activeCreator.name}</div>
-            <div className="text-muted-foreground text-sm">AI trained by @{activeCreator.username}</div>
+        {!activeCreator ? (
+          <div className="flex-1 flex items-center justify-center text-muted-foreground">
+            <p>Select a creator to start chatting</p>
           </div>
+        ) : (
+          <>
+            {/* Top Bar */}
+            <div className="bg-card border-b border-border px-6 py-4 flex items-center gap-3">
+              <img
+                src={activeCreator.avatar}
+                alt={activeCreator.name}
+                className="w-10 h-10 rounded-full object-cover"
+              />
+              
+              <div className="flex-1 min-w-0">
+                <div className="text-foreground font-medium">{activeCreator.name}</div>
+                <div className="text-muted-foreground text-sm">@{activeCreator.username}</div>
+              </div>
 
-          <div className="w-2 h-2 rounded-full bg-green-500"></div>
-        </div>
+              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+            </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
-          <div className="max-w-3xl mx-auto space-y-4">
-            <AnimatePresence initial={false}>
-              {messages.map((message) => (
-                <motion.div
-                  key={message.id}
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.3 }}
-                  className={`flex ${message.role === 'fan' ? 'justify-end' : 'justify-start'}`}
-                >
-                  <div
-                    style={{
-                      backgroundColor: message.role === 'fan' ? '#E5E7EB' : activeCreator.brandColor,
-                    }}
-                    className={`max-w-[75%] px-4 py-3 rounded-[18px] ${
-                      message.role === 'fan'
-                        ? 'text-foreground'
-                        : 'text-white'
-                    }`}
-                  >
-                    {message.content}
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
+              <div className="max-w-3xl mx-auto space-y-4">
+                <AnimatePresence initial={false}>
+                  {messages.map((message) => (
+                    <motion.div
+                      key={message.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.3 }}
+                      className={`flex ${message.role === 'fan' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        style={{
+                          backgroundColor: message.role === 'fan' ? '#E5E7EB' : activeCreator.brandColor,
+                        }}
+                        className={`max-w-[75%] px-4 py-3 rounded-[18px] ${
+                          message.role === 'fan'
+                            ? 'text-foreground'
+                            : 'text-white'
+                        }`}
+                      >
+                        {message.content}
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {loading && (
+                  <div className="flex justify-start">
+                    <div
+                      style={{ backgroundColor: activeCreator.brandColor }}
+                      className="px-4 py-3 rounded-[18px] text-white"
+                    >
+                      Thinking...
+                    </div>
                   </div>
-                </motion.div>
-              ))}
-            </AnimatePresence>
-            {loading && (
-              <div className="flex justify-start">
-                <div
-                  style={{ backgroundColor: activeCreator.brandColor }}
-                  className="px-4 py-3 rounded-[18px] text-white"
-                >
-                  Thinking...
-                </div>
+                )}
+                <div ref={messagesEndRef} />
               </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
+            </div>
 
-        {/* Powered by tag */}
-        <div className="px-6 pb-2 text-center">
-          <div className="text-muted-foreground text-sm">powered by Creator Brain</div>
-        </div>
-
-        {/* Input Bar */}
-        <div className="bg-card border-t border-border px-6 py-4 safe-area-bottom">
-          <div className="max-w-3xl mx-auto">
-            {subscriptionId ? (
-              <>
-                <div className="flex items-end gap-2 mb-2">
-                  <input
-                    type="text"
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    placeholder="Type a message…"
-                    className="flex-1 px-4 py-3 rounded-[14px] bg-input-background border-0 
-                             focus:outline-none focus:ring-2 focus:ring-ring transition-all text-foreground placeholder:text-muted-foreground"
-                    disabled={loading}
-                  />
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    onClick={handleSend}
-                    disabled={!inputValue.trim() || loading}
-                    style={{ backgroundColor: activeCreator.brandColor }}
-                    className="p-3 rounded-[14px] text-white disabled:opacity-40 
-                             transition-opacity hover:opacity-90"
-                  >
-                    <Send className="w-5 h-5" />
-                  </motion.button>
-                </div>
-              </>
-            ) : (
-              <div className="text-center py-2">
-                <div className="text-foreground mb-3">Subscribe to chat with {activeCreator.name}</div>
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  style={{ backgroundColor: activeCreator.brandColor }}
-                  className="px-6 py-3 rounded-[14px] text-white"
-                  onClick={() => {
-                    // Trigger subscription modal - this would be handled by parent
-                    onSelectCreator(activeCreator);
-                  }}
-                >
-                  Subscribe for ${activeCreator.price}/mo
-                </motion.button>
+            {/* Input Bar */}
+            <div className="bg-card border-t border-border px-6 py-4 safe-area-bottom">
+              <div className="max-w-3xl mx-auto">
+                {subscriptionId ? (
+                  <>
+                    <div className="flex items-end gap-2 mb-2">
+                      <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) => setInputValue(e.target.value)}
+                        onKeyPress={handleKeyPress}
+                        placeholder="Type a message…"
+                        className="flex-1 px-4 py-3 rounded-[14px] bg-input-background border-0 
+                                 focus:outline-none focus:ring-2 focus:ring-ring transition-all text-foreground placeholder:text-muted-foreground"
+                        disabled={loading}
+                      />
+                      <motion.button
+                        whileTap={{ scale: 0.95 }}
+                        onClick={handleSend}
+                        disabled={!inputValue.trim() || loading}
+                        style={{ backgroundColor: activeCreator.brandColor }}
+                        className="p-3 rounded-[14px] text-white disabled:opacity-40 
+                                 transition-opacity hover:opacity-90"
+                      >
+                        <Send className="w-5 h-5" />
+                      </motion.button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center py-2">
+                    <div className="text-foreground mb-3">Subscribe to chat with {activeCreator.name}</div>
+                    <motion.button
+                      whileHover={{ scale: 1.02 }}
+                      whileTap={{ scale: 0.98 }}
+                      style={{ backgroundColor: activeCreator.brandColor }}
+                      className="px-6 py-3 rounded-[14px] text-white"
+                      onClick={() => {
+                        // Trigger subscription modal - this would be handled by parent
+                        onSelectCreator(activeCreator);
+                      }}
+                    >
+                      Subscribe for ${activeCreator.price}/mo
+                    </motion.button>
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

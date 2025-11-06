@@ -1,4 +1,4 @@
-import { LayoutDashboard, Brain, Users, DollarSign, Settings, LogOut } from 'lucide-react';
+import { LayoutDashboard, Brain, Users, DollarSign, Settings, LogOut, MessageSquare } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -9,6 +9,7 @@ export function Sidebar() {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
+    { id: 'messages', label: 'Messages', icon: MessageSquare, path: '/messages' },
     { id: 'train', label: 'Train Your Brain', icon: Brain, path: '/train' },
     { id: 'subscribers', label: 'Subscribers', icon: Users, path: '/subscribers' },
     { id: 'earnings', label: 'Earnings', icon: DollarSign, path: '/earnings' },
@@ -23,7 +24,7 @@ export function Sidebar() {
   return (
     <aside className="w-64 bg-white border-r border-gray-200 flex flex-col">
       <div className="p-6">
-        <h1 className="text-[#7A5FFF]">CreatorBrain</h1>
+        <img src="/chatpasslogo.png" alt="Chat Pass" className="h-8 w-auto" />
       </div>
       
       <nav className="flex-1 px-3">
