@@ -1,0 +1,24 @@
+{
+  "name": "hype-loop",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/creators",
+    "dev:creators": "npm run dev --workspace=apps/creators",
+    "dev:fans": "npm run dev --workspace=apps/fans",
+    "build": "npm run build --workspaces",
+    "build:creators": "npm run build --workspace=apps/creators",
+    "build:fans": "npm run build --workspace=apps/fans",
+    "lint": "npm run lint --workspaces",
+    "preview:creators": "npm run preview --workspace=apps/creators",
+    "preview:fans": "npm run preview --workspace=apps/fans"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}
