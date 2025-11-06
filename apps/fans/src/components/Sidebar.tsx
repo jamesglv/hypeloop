@@ -58,7 +58,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
               key={item.id}
               whileTap={{ scale: 0.98 }}
               onClick={() => handleNavClick(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-[10px] mb-1 transition-all ${
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-[10px] mb-1 transition-all cursor-pointer ${
                 isActive
                   ? 'bg-[#7C3AED] text-white'
                   : 'text-foreground hover:bg-accent'
@@ -76,7 +76,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         <motion.button
           whileTap={{ scale: 0.98 }}
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-[10px] text-foreground hover:bg-accent transition-all"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-[10px] text-foreground hover:bg-accent transition-all cursor-pointer"
         >
           <LogOut className="w-5 h-5" />
           <span>Logout</span>

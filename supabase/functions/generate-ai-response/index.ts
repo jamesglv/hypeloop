@@ -246,8 +246,78 @@ serve(async (req) => {
     // Build AI prompt from creator profile
     // The training data is stored in creator_profiles as JSONB columns
     let prompt
+    let promptSummary
     try {
-      prompt = buildCreatorPrompt(creator, profile, conversation_history || [])
+      const result = buildCreatorPrompt(creator, profile, conversation_history || [])
+      prompt = result.prompt
+      promptSummary = result.summary
+      
+      console.log('\n=== PROMPT SUMMARY: TONE, PERSONALITY & STYLE ===')
+      console.log('Creator:', creator.display_name)
+      console.log('Niche/Expertise:', profile.niche?.join(', ') || 'Not specified')
+      console.log('---')
+      console.log('Tone Settings:')
+      if (profile.tone_settings) {
+        const tone = profile.tone_settings
+        const formality = tone.formal_casual || 65
+        const energy = tone.calm_energetic || 85
+        const directness = tone.gentle_blunt || 70
+        
+        const formalityDesc = formality < 30 ? 'very formal' : formality > 70 ? 'very casual' : 'moderate'
+        const energyDesc = energy < 30 ? 'calm/measured' : energy > 70 ? 'very energetic' : 'moderate'
+        const directnessDesc = directness < 30 ? 'gentle/tactful' : directness > 70 ? 'very direct' : 'moderate'
+        
+        console.log(`  • Formality: ${formality}% casual (${formalityDesc})`)
+        console.log(`  • Energy: ${energy}% energetic (${energyDesc})`)
+        console.log(`  • Directness: ${directness}% blunt (${directnessDesc})`)
+      } else {
+        console.log('  • Not configured (using defaults)')
+      }
+      console.log('---')
+      console.log('Response Style:', profile.response_style || 'Not specified')
+      if (profile.response_style) {
+        const styleDescriptions: Record<string, string> = {
+          'comforting': 'Warm, empathetic, and supportive',
+          'honest & direct': 'Straightforward and honest, no sugarcoating',
+          'honest and direct': 'Straightforward and honest, no sugarcoating',
+          'humorous': 'Funny, lighthearted, uses humor naturally',
+          'private boundary': 'Respects privacy, maintains appropriate distance'
+        }
+        console.log(`  → ${styleDescriptions[profile.response_style.toLowerCase()] || 'Custom style'}`)
+      }
+      console.log('---')
+      console.log('Training Data:')
+      console.log(`  • Total examples: ${promptSummary.totalTrainingItems}`)
+      console.log(`  • Voice & Personality: ${promptSummary.pillarCounts.voice_personality} examples`)
+      console.log(`  • Humor & Human Touch: ${promptSummary.pillarCounts.humor_human_touch} examples`)
+      console.log(`  • Expertise & Knowledge: ${promptSummary.pillarCounts.expertise_knowledge} examples`)
+      console.log(`  • Story & Credibility: ${promptSummary.pillarCounts.story_credibility} examples`)
+      console.log(`  • Community & Culture: ${promptSummary.pillarCounts.community_culture} examples`)
+      console.log(`  • Has training data: ${promptSummary.hasTrainingData ? 'Yes ✓' : 'No ⚠️'}`)
+      console.log('---')
+      console.log('Emoji Usage:')
+      if (profile.emoji_bank && Array.isArray(profile.emoji_bank) && profile.emoji_bank.length > 0) {
+        const validEmojis = profile.emoji_bank.filter((e: any) => e && e.emoji && e.meaning)
+        console.log(`  • ${validEmojis.length} emoji(s) configured`)
+        validEmojis.slice(0, 5).forEach((e: any) => {
+          console.log(`    ${e.emoji} = ${e.meaning}`)
+        })
+        if (validEmojis.length > 5) {
+          console.log(`    ... and ${validEmojis.length - 5} more`)
+        }
+      } else {
+        console.log('  • Not configured')
+      }
+      console.log('---')
+      if (profile.default_greeting) {
+        console.log('Default Greeting Style:', profile.default_greeting)
+      }
+      console.log('---')
+      console.log('Prompt Stats:')
+      console.log(`  • Total length: ${prompt.length} characters`)
+      console.log(`  • Conversation history: ${conversation_history?.length || 0} messages`)
+      console.log('=== END PROMPT SUMMARY ===\n')
+      
       console.log('\n=== FINAL PROMPT INFO ===')
       console.log('Prompt length:', prompt.length)
       console.log('Prompt preview (first 1000 chars):')
@@ -280,13 +350,19 @@ serve(async (req) => {
     }
 
     // Prepare messages for OpenAI
+    // Add instruction to user message to reinforce training data usage
+    let userMessage = messageContent
+    if (promptSummary && promptSummary.hasTrainingData && promptSummary.totalTrainingItems > 0) {
+      userMessage = `IMPORTANT: Before responding, review the ${promptSummary.totalTrainingItems} training examples in the system prompt. Match the exact style, vocabulary, and tone from those examples. Use the same sentence structures and phrases. DO NOT use generic AI language.\n\nFan's message: ${messageContent}`
+    }
+    
     const openaiMessages = [
       { role: 'system', content: prompt },
       ...(conversation_history || []).map((msg: any) => ({
         role: msg.role === 'fan' ? 'user' : 'assistant',
         content: msg.content
       })),
-      { role: 'user', content: messageContent }
+      { role: 'user', content: userMessage }
     ]
 
     console.log('Calling OpenAI API with model: gpt-3.5-turbo')
@@ -304,10 +380,10 @@ serve(async (req) => {
       body: JSON.stringify({
           model: 'gpt-3.5-turbo', // Using gpt-3.5-turbo as it's widely available and cost-effective
           messages: openaiMessages,
-          temperature: 0.8, // Slightly higher temperature for more personality and variation
-        max_tokens: 500,
-          presence_penalty: 0.1, // Encourage using the training data vocabulary
-          frequency_penalty: 0.1, // Slight penalty to avoid repetition
+          temperature: 0.6, // Lower temperature for more deterministic, training-data-focused responses
+          max_tokens: 500,
+          presence_penalty: 0.3, // Higher penalty to encourage using words/phrases from training data
+          frequency_penalty: 0.2, // Moderate penalty to avoid repetition while allowing training data patterns
       }),
     })
     } catch (fetchError) {
@@ -464,19 +540,9 @@ serve(async (req) => {
   }
 })
 
-function buildCreatorPrompt(creator: any, profile: any, history: any[]): string {
-  // Start with a strong identity statement
-  let prompt = `You are ${creator.display_name}, and you MUST respond EXACTLY as ${creator.display_name} would respond. `
-  prompt += `This is CRITICAL - you are not a generic AI assistant, you ARE ${creator.display_name}.\n\n`
-  
-  if (creator.bio) {
-    prompt += `About ${creator.display_name}: ${creator.bio}\n\n`
-  }
-
-  // Add niche early for context
-  if (profile.niche && profile.niche.length > 0) {
-    prompt += `Your expertise and focus areas: ${profile.niche.join(', ')}\n\n`
-  }
+function buildCreatorPrompt(creator: any, profile: any, history: any[]): { prompt: string; summary: any } {
+  // CRITICAL: Training data must come FIRST - this is the most important part
+  // We'll build the prompt structure to prioritize training examples above all else
 
   // CRITICAL: Add training data FIRST and make it the primary focus
   // These are the 5 pillars of training data that define the creator's voice
@@ -491,6 +557,13 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): string 
   let hasTrainingData = false
   let totalTrainingItems = 0
   let trainingExamples: string[] = []
+  const pillarCounts: Record<string, number> = {
+    voice_personality: 0,
+    humor_human_touch: 0,
+    expertise_knowledge: 0,
+    story_credibility: 0,
+    community_culture: 0
+  }
   
   // Collect all training data first
   console.log('=== PROCESSING TRAINING DATA ===')
@@ -563,6 +636,7 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): string 
             const example = `[${pillar.name}] Q: ${question}\nA: ${answer}`
             trainingExamples.push(example)
             totalTrainingItems++
+            pillarCounts[pillar.key]++
             console.log(`  - ✓ Added example: ${question.substring(0, 50)}...`)
           }
         })
@@ -576,39 +650,71 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): string 
   console.log('Has training data:', hasTrainingData)
   console.log('=== END PROCESSING TRAINING DATA ===\n')
 
-  // Add training data prominently at the top - THIS IS THE MOST IMPORTANT PART
+  // Build prompt starting with training data - THIS IS THE MOST CRITICAL PART
+  let prompt = ''
+  
   if (hasTrainingData && trainingExamples.length > 0) {
-    prompt += `\n╔══════════════════════════════════════════════════════════════════════════════╗\n`
-    prompt += `║  CRITICAL: YOUR PERSONALITY, VOICE, AND COMMUNICATION STYLE                ║\n`
-    prompt += `║  YOU MUST USE THESE EXAMPLES TO MATCH ${creator.display_name.toUpperCase()}'S EXACT VOICE  ║\n`
+    // START WITH TRAINING DATA - Most important, must come first
+    prompt += `╔══════════════════════════════════════════════════════════════════════════════╗\n`
+    prompt += `║                    YOU ARE ${creator.display_name.toUpperCase()}                      ║\n`
+    prompt += `║  These ${totalTrainingItems} examples below are YOUR ACTUAL WORDS and RESPONSES      ║\n`
+    prompt += `║  You MUST respond EXACTLY like these examples - copy the style, tone, and voice ║\n`
     prompt += `╚══════════════════════════════════════════════════════════════════════════════╝\n\n`
     
-    prompt += `The following ${totalTrainingItems} examples show EXACTLY how ${creator.display_name} thinks, speaks, and responds. `
-    prompt += `These are REAL examples of ${creator.display_name}'s communication style. `
-    prompt += `You MUST study these and respond in the EXACT same voice, tone, personality, and style:\n\n`
+    prompt += `CRITICAL INSTRUCTION: The following ${totalTrainingItems} examples are REAL responses from ${creator.display_name}. `
+    prompt += `These are NOT suggestions - these are EXAMPLES OF HOW YOU ACTUALLY SPEAK. `
+    prompt += `When responding to fans, you MUST match the exact style, vocabulary, sentence structure, tone, and personality shown in these examples.\n\n`
+    
+    prompt += `STEP 1: Before writing ANY response, review ALL ${totalTrainingItems} examples below.\n`
+    prompt += `STEP 2: Identify which example(s) are most similar to the fan's question or situation.\n`
+    prompt += `STEP 3: Use the SAME words, phrases, sentence patterns, and tone from those examples.\n`
+    prompt += `STEP 4: Write your response using the EXACT communication style from the examples.\n\n`
     
     prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-    prompt += `TRAINING EXAMPLES (USE THESE TO MATCH ${creator.display_name.toUpperCase()}'S VOICE):\n`
+    prompt += `YOUR ACTUAL RESPONSES - USE THESE AS TEMPLATES FOR EVERY MESSAGE:\n`
     prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`
     
     trainingExamples.forEach((example, index) => {
-      prompt += `Example ${index + 1}:\n${example}\n\n`
+      prompt += `[EXAMPLE ${index + 1} - STUDY THIS CAREFULLY]\n`
+      prompt += `${example}\n\n`
+      prompt += `Key patterns to copy from this example:\n`
+      prompt += `- Sentence structure and length\n`
+      prompt += `- Specific words and phrases used\n`
+      prompt += `- Tone and energy level\n`
+      prompt += `- How ideas are expressed\n\n`
       prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n`
     })
     
     prompt += `╔══════════════════════════════════════════════════════════════════════════════╗\n`
-    prompt += `║  REMEMBER: The ${totalTrainingItems} examples above show ${creator.display_name}'s authentic voice.  ║\n`
-    prompt += `║  Your responses MUST sound EXACTLY like ${creator.display_name} wrote them.        ║\n`
-    prompt += `║  Match the language, tone, style, and personality from those examples.      ║\n`
+    prompt += `║  MANDATORY: Before responding to ANY message, you MUST:\n`
+    prompt += `║  1. Review the ${totalTrainingItems} examples above\n`
+    prompt += `║  2. Find the example(s) most similar to the fan's question\n`
+    prompt += `║  3. Copy the sentence structure, vocabulary, and tone from those examples\n`
+    prompt += `║  4. Write your response using the EXACT style from the examples\n`
+    prompt += `║  5. DO NOT use generic AI language - use ${creator.display_name}'s actual voice\n`
     prompt += `╚══════════════════════════════════════════════════════════════════════════════╝\n\n`
     
     console.log(`✓ Included ${totalTrainingItems} training examples in prompt`)
   } else {
     console.log('⚠ WARNING: No training data found in creator profile - responses may be generic')
+    // Still build a basic prompt even without training data
+    prompt += `You are ${creator.display_name}.\n\n`
     if (totalTrainingItems === 0) {
-      prompt += `\n⚠ WARNING: No training examples found for ${creator.display_name}. `
-      prompt += `You will need to infer their voice from the tone settings and other information below.\n\n`
+      prompt += `⚠ WARNING: No training examples found. You will need to infer the voice from tone settings below.\n\n`
     }
+  }
+  
+  // Add basic identity and context AFTER training data
+  prompt += `You are ${creator.display_name}, and you MUST respond EXACTLY as ${creator.display_name} would respond. `
+  prompt += `This is CRITICAL - you are not a generic AI assistant, you ARE ${creator.display_name}.\n\n`
+  
+  if (creator.bio) {
+    prompt += `About ${creator.display_name}: ${creator.bio}\n\n`
+  }
+
+  // Add niche for context
+  if (profile.niche && profile.niche.length > 0) {
+    prompt += `Your expertise and focus areas: ${profile.niche.join(', ')}\n\n`
   }
 
   // Add tone settings with explicit instructions
@@ -662,7 +768,7 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): string 
     })
     if (validEmojis.length > 0) {
       prompt += `=== EMOJI USAGE ===\n`
-      prompt += `Use emojis naturally as ${creator.display_name} would:\n`
+      prompt += `Do not use emojis`//Add later: `Use emojis naturally as ${creator.display_name} would:\n`
       validEmojis.forEach((e: any) => {
         prompt += `- ${e.emoji} means: ${e.meaning}\n`
     })
@@ -676,48 +782,78 @@ function buildCreatorPrompt(creator: any, profile: any, history: any[]): string 
     prompt += `When greeting fans, use this style: "${profile.default_greeting}"\n\n`
   }
 
-  // CRITICAL FINAL INSTRUCTIONS - Make these VERY explicit
+  // CRITICAL FINAL INSTRUCTIONS - Make these VERY explicit and force training data usage
   prompt += `\n╔══════════════════════════════════════════════════════════════════════════════╗\n`
-  prompt += `║                    CRITICAL RESPONSE REQUIREMENTS                            ║\n`
+  prompt += `║              MANDATORY RESPONSE PROCESS - FOLLOW EXACTLY                     ║\n`
   prompt += `╚══════════════════════════════════════════════════════════════════════════════╝\n\n`
   
   if (hasTrainingData && trainingExamples.length > 0) {
-    prompt += `1. ⚠️ CRITICAL: You MUST use the ${totalTrainingItems} training examples above as your PRIMARY reference. `
-    prompt += `Those examples show EXACTLY how ${creator.display_name} communicates. `
-    prompt += `Match that voice, tone, language patterns, and personality in EVERY response.\n\n`
+    prompt += `FOR EVERY FAN MESSAGE, YOU MUST FOLLOW THIS EXACT PROCESS:\n\n`
+    prompt += `STEP 1: Read the fan's message carefully.\n\n`
+    prompt += `STEP 2: Go back and review the ${totalTrainingItems} training examples above. Find 1-3 examples that are most similar to:\n`
+    prompt += `   - The type of question being asked\n`
+    prompt += `   - The tone or emotion in the fan's message\n`
+    prompt += `   - The topic or subject matter\n\n`
+    prompt += `STEP 3: Copy the EXACT communication patterns from those examples:\n`
+    prompt += `   - Use the SAME sentence structures (short/long, simple/complex)\n`
+    prompt += `   - Use the SAME specific words and phrases\n`
+    prompt += `   - Match the SAME tone and energy level\n`
+    prompt += `   - Use the SAME way of expressing ideas\n`
+    prompt += `   - Match the SAME level of formality or casualness\n\n`
+    prompt += `STEP 4: Write your response by adapting those examples to answer the fan's question.\n`
+    prompt += `   - DO NOT create new language patterns\n`
+    prompt += `   - DO NOT use generic AI phrases like "I understand", "That's a great question", etc.\n`
+    prompt += `   - DO use the exact vocabulary and phrases from the training examples\n`
+    prompt += `   - DO match the sentence structure from the examples\n\n`
+    prompt += `STEP 5: Before finalizing, ask yourself:\n`
+    prompt += `   - "Does this sound EXACTLY like the training examples?"\n`
+    prompt += `   - "Would someone who knows ${creator.display_name} recognize this as their voice?"\n`
+    prompt += `   - "Am I using the same words and phrases from the examples?"\n`
+    prompt += `   - If NO to any question, rewrite using the training examples as templates.\n\n`
     
-    prompt += `2. ⚠️ CRITICAL: Study the training examples carefully. Notice:\n`
-    prompt += `   - How ${creator.display_name} structures their sentences\n`
-    prompt += `   - The words and phrases they use\n`
-    prompt += `   - Their level of formality or casualness\n`
-    prompt += `   - Their energy and enthusiasm level\n`
-    prompt += `   - How they express ideas and opinions\n`
-    prompt += `   - Their sense of humor (if any)\n`
-    prompt += `   - Their communication style\n\n`
-    
-    prompt += `3. When responding, ask yourself: "Would ${creator.display_name} say it this way based on the training examples?" `
-    prompt += `If not, rewrite it to match their voice from the examples.\n\n`
+    prompt += `⚠️ CRITICAL RULES:\n`
+    prompt += `- The training examples are NOT suggestions - they are TEMPLATES to copy\n`
+    prompt += `- If a training example shows ${creator.display_name} using short sentences, use short sentences\n`
+    prompt += `- If a training example shows ${creator.display_name} using specific phrases, use those phrases\n`
+    prompt += `- If a training example shows ${creator.display_name} being casual, be casual\n`
+    prompt += `- If a training example shows ${creator.display_name} being formal, be formal\n`
+    prompt += `- NEVER use generic AI language that doesn't appear in the training examples\n`
+    prompt += `- ALWAYS prioritize matching the training examples over being helpful or informative\n\n`
+  } else {
+    prompt += `⚠️ WARNING: No training examples available. Use tone settings below, but responses may be generic.\n\n`
   }
   
-  prompt += `4. Apply the tone settings (formality: ${profile.tone_settings?.formal_casual || 65}%, energy: ${profile.tone_settings?.calm_energetic || 85}%, directness: ${profile.tone_settings?.gentle_blunt || 70}%) to EVERY response.\n\n`
+  // Tone settings should reinforce training data, not override it
+  if (profile.tone_settings && typeof profile.tone_settings === 'object') {
+    const tone = profile.tone_settings
+    prompt += `Tone Settings (use these to guide your response, but training examples take priority):\n`
+    prompt += `- Formality: ${tone.formal_casual || 65}% casual\n`
+    prompt += `- Energy: ${tone.calm_energetic || 85}% energetic\n`
+    prompt += `- Directness: ${tone.gentle_blunt || 70}% blunt\n\n`
+  }
   
   if (profile.response_style) {
-    prompt += `5. Match the response style: ${profile.response_style}. This is how ${creator.display_name} communicates.\n\n`
+    prompt += `Response Style: ${profile.response_style}\n`
+    prompt += `(But match the training examples first - they show the actual style)\n\n`
   }
   
-  prompt += `6. Be authentic and natural. If the training examples show ${creator.display_name} being casual, be casual. `
-  prompt += `If they show professionalism, be professional. Match what you see in the examples.\n\n`
-  
-  prompt += `7. ⚠️ DO NOT sound like a generic AI assistant. Sound EXACTLY like ${creator.display_name} based on the training examples.\n\n`
-  
-  prompt += `8. Use the same vocabulary, expressions, and communication patterns from the training examples.\n\n`
-  
   prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`
-  prompt += `FINAL REMINDER: When a fan sends you a message, respond as ${creator.display_name} would respond, `
-  prompt += `using the ${hasTrainingData ? totalTrainingItems + ' training examples and ' : ''}tone settings above. `
-  prompt += `Your response should sound like ${creator.display_name} wrote it, not an AI.\n`
+  if (hasTrainingData && trainingExamples.length > 0) {
+    prompt += `FINAL REMINDER: The ${totalTrainingItems} training examples above are ${creator.display_name}'s ACTUAL WORDS. `
+    prompt += `Your response MUST sound like those examples. If it doesn't, you're doing it wrong. `
+    prompt += `Copy the style, vocabulary, and tone from the examples. DO NOT sound like a generic AI.\n`
+  } else {
+    prompt += `FINAL REMINDER: Respond as ${creator.display_name} would, using the tone settings above.\n`
+  }
   prompt += `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`
 
-  return prompt
+  return {
+    prompt,
+    summary: {
+      totalTrainingItems,
+      hasTrainingData,
+      pillarCounts
+    }
+  }
 }
 

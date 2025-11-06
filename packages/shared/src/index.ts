@@ -1,3 +1,3 @@
 export { openai } from './openaiClient'
-export { supabase } from './supabaseClient'
+export { supabase, supabaseUrl, supabaseKey } from './supabaseClient'
 

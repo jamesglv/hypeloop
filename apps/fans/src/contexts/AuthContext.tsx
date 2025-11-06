@@ -87,33 +87,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null)
       setLoading(false)
       
-      // Create fan profile if user exists and profile doesn't exist
-      if (session?.user) {
-        (async () => {
-          try {
-            const { data: existingFan, error: checkError } = await supabase
-              .from('fans')
-              .select('id')
-              .eq('id', session.user.id)
-              .maybeSingle()
-            
-            // If profile doesn't exist (no data or error), create it
-            if ((checkError && checkError.code === 'PGRST116') || !existingFan) {
-              const { error: insertError } = await supabase.from('fans').insert({
-                id: session.user.id,
-                display_name: '',
-                username: 'user_' + session.user.id.substring(0, 8),
-              })
-              
-              if (insertError) {
-                console.error('Error creating fan profile:', insertError)
-              }
-            }
-          } catch (error) {
-            console.error('Error checking/creating fan profile:', error)
-          }
-        })()
-      }
+      // Fan profile should be created automatically by database trigger
+      // We just need to check if it exists, but don't create it manually
+      // The trigger handles creation with proper timing to avoid foreign key issues
     }).catch((error) => {
       if (!isMounted) return
       clearTimeout(timeoutId)
@@ -127,7 +103,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     // Listen for auth changes
-    let subscriptionActive = true
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (_event, session) => {
@@ -137,36 +112,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(session?.user ?? null)
       setLoading(false)
       
-      // Create fan profile if user exists and profile doesn't exist
-      if (session?.user) {
-        try {
-          const { data: existingFan, error: checkError } = await supabase
-            .from('fans')
-            .select('id')
-            .eq('id', session.user.id)
-            .maybeSingle()
-          
-          // If profile doesn't exist (no data or error), create it
-          if ((checkError && checkError.code === 'PGRST116') || !existingFan) {
-            const { error: insertError } = await supabase.from('fans').insert({
-              id: session.user.id,
-              display_name: '',
-              username: 'user_' + session.user.id.substring(0, 8),
-            })
-            
-            if (insertError) {
-              console.error('Error creating fan profile:', insertError)
-            }
-          }
-        } catch (error) {
-          console.error('Error checking/creating fan profile:', error)
-        }
-      }
+      // Fan profile should be created automatically by database trigger
+      // We just need to check if it exists, but don't create it manually
+      // The trigger handles creation with proper timing to avoid foreign key issues
     })
 
     return () => {
       isMounted = false
-      subscriptionActive = false
       subscription.unsubscribe()
     }
   }, [])
@@ -182,7 +134,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     try {
-      const { data, error } = await supabase.auth.signUp({
+      const { error } = await supabase.auth.signUp({
         email,
         password,
       })
@@ -191,24 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { error: new Error(error.message) }
       }
       
-      // Create fan profile immediately after signup
-      if (data.user) {
-        // Check if profile already exists
-        const { data: existingFan } = await supabase
-          .from('fans')
-          .select('id')
-          .eq('id', data.user.id)
-          .single()
-        
-        if (!existingFan) {
-          // Create fan profile with default username
-          await supabase.from('fans').insert({
-            id: data.user.id,
-            display_name: '',
-            username: 'user_' + data.user.id.substring(0, 8),
-          })
-        }
-      }
+      // Fan profile will be created automatically by database trigger
+      // No need to manually create it here, which avoids foreign key constraint issues
       
       return { error: null }
     } catch (error) {

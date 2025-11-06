@@ -36,7 +36,7 @@ export function Sidebar() {
             <button
               key={item.id}
               onClick={() => navigate(item.path)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all ${
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl mb-1 transition-all cursor-pointer ${
                 isActive
                   ? 'bg-[#7A5FFF] text-white'
                   : 'text-gray-700 hover:bg-gray-100'
@@ -52,7 +52,7 @@ export function Sidebar() {
       <div className="p-3 border-t border-gray-200">
         <button 
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 transition-all"
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-gray-700 hover:bg-gray-100 transition-all cursor-pointer"
         >
           <LogOut className="w-5 h-5" />
           <span>Logout</span>

@@ -21,22 +21,40 @@ export default function ProfileSetup() {
       }
 
       try {
-        const { data, error: fetchError } = await supabase
-          .from('fans')
-          .select('display_name, username')
-          .eq('id', user.id)
-          .maybeSingle()
+        // Wait for profile to be created by trigger (with retries)
+        let retries = 5
+        let profileData = null
+        
+        while (retries > 0 && !profileData) {
+          const { data, error: fetchError } = await supabase
+            .from('fans')
+            .select('display_name, username')
+            .eq('id', user.id)
+            .maybeSingle()
 
-        if (fetchError && fetchError.code !== 'PGRST116') {
-          console.error('Error loading profile:', fetchError)
-        } else if (data) {
+          if (fetchError && fetchError.code !== 'PGRST116') {
+            console.error('Error loading profile:', fetchError)
+            break
+          } else if (data) {
+            profileData = data
+            break
+          } else {
+            // Profile doesn't exist yet, wait for trigger
+            await new Promise(resolve => setTimeout(resolve, 500))
+            retries--
+          }
+        }
+
+        if (profileData) {
           // Pre-populate form with existing data (only if not default values)
-          if (data.display_name && data.display_name.trim()) {
-            setDisplayName(data.display_name)
+          if (profileData.display_name && profileData.display_name.trim()) {
+            setDisplayName(profileData.display_name)
           }
-          if (data.username && data.username.trim() && !data.username.startsWith('user_')) {
-            setUsername(data.username)
+          if (profileData.username && profileData.username.trim() && !profileData.username.startsWith('user_')) {
+            setUsername(profileData.username)
           }
+        } else {
+          console.warn('Profile not found after retries. Trigger may not have run yet.')
         }
       } catch (err) {
         console.error('Error loading profile:', err)
@@ -66,19 +84,67 @@ export default function ProfileSetup() {
         return
       }
 
-      // Check if profile already exists (update) or create new one
-      const { data: existingProfile, error: checkError } = await supabase
-        .from('fans')
-        .select('id')
-        .eq('id', user.id)
-        .maybeSingle()
+      // Profile should already exist due to database trigger
+      // If it doesn't exist, wait a moment and retry (trigger might be delayed)
+      let retries = 5
+      let profileExists = false
+      
+      while (retries > 0 && !profileExists) {
+        const { data, error: checkError } = await supabase
+          .from('fans')
+          .select('id')
+          .eq('id', user.id)
+          .maybeSingle()
 
-      if (checkError && checkError.code !== 'PGRST116') {
-        // PGRST116 is "no rows returned" which is fine, other errors should be thrown
-        throw checkError
+        if (checkError && checkError.code !== 'PGRST116') {
+          throw checkError
+        }
+
+        if (data) {
+          profileExists = true
+        } else {
+          // Wait a bit for the trigger to create the profile
+          await new Promise(resolve => setTimeout(resolve, 500))
+          retries--
+        }
       }
 
-      if (existingProfile) {
+      // If profile still doesn't exist after retries, create it as a fallback
+      // This handles cases where the trigger might have failed
+      if (!profileExists) {
+        console.warn('Profile not found after retries, creating as fallback')
+        const { error: insertError } = await supabase
+          .from('fans')
+          .insert({
+            id: user.id,
+            display_name: displayName,
+            username: username,
+          })
+
+        if (insertError) {
+          // If insert fails, it might be because the profile was just created
+          // Try to update instead
+          if (insertError.code === '23505' || insertError.code === '409') {
+            // Profile exists now, try to update
+            const { error: updateError } = await supabase
+              .from('fans')
+              .update({
+                display_name: displayName,
+                username: username,
+              })
+              .eq('id', user.id)
+
+            if (updateError) {
+              if (updateError.code === '23505') {
+                throw new Error('This username is already taken. Please choose another.')
+              }
+              throw updateError
+            }
+          } else {
+            throw insertError
+          }
+        }
+      } else {
         // Update existing profile
         const { error: updateError } = await supabase
           .from('fans')
@@ -88,16 +154,18 @@ export default function ProfileSetup() {
           })
           .eq('id', user.id)
 
-        if (updateError) throw updateError
-      } else {
-        // Create new profile
-        const { error: insertError } = await supabase.from('fans').insert({
-          id: user.id,
-          display_name: displayName,
-          username: username,
-        })
-
-        if (insertError) throw insertError
+        if (updateError) {
+          // Handle specific error codes
+          if (updateError.code === '23505') {
+            // Unique constraint violation (username already taken)
+            throw new Error('This username is already taken. Please choose another.')
+          } else if (updateError.code === '409' || updateError.message?.includes('Conflict')) {
+            // Conflict error - profile might already exist with different data
+            // Try to update again or show a helpful message
+            throw new Error('Profile update conflict. Please refresh the page and try again.')
+          }
+          throw updateError
+        }
       }
 
       // Refresh profile completion status
@@ -106,9 +174,11 @@ export default function ProfileSetup() {
       // Redirect to dashboard after profile is complete
       navigate('/dashboard')
     } catch (err: any) {
-      if (err.code === '23505') {
+      if (err.code === '23505' || err.message?.includes('already taken')) {
         // Unique constraint violation (username already taken)
         setError('This username is already taken. Please choose another.')
+      } else if (err.code === '409' || err.message?.includes('Conflict')) {
+        setError('There was a conflict updating your profile. Please refresh the page and try again.')
       } else {
         setError(err.message || 'Failed to save profile. Please try again.')
       }

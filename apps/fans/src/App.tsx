@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { ProtectedRoute } from './components/ProtectedRoute'
 import { AuthRedirect } from './components/AuthRedirect'
@@ -12,10 +12,13 @@ import SignUp from './pages/SignUp'
 import SignIn from './pages/SignIn'
 import VerifyEmail from './pages/VerifyEmail'
 import ProfileSetup from './pages/ProfileSetup'
+import SubscriptionSuccess from './pages/SubscriptionSuccess'
+import SubscriptionCancel from './pages/SubscriptionCancel'
 
 function DashboardContent() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const [currentPage, setCurrentPage] = useState<'home' | 'subscriptions' | 'profile' | 'messages'>(() => {
     // Determine initial page based on route
@@ -26,6 +29,61 @@ function DashboardContent() {
   });
   const [selectedCreator, setSelectedCreator] = useState<Creator | null>(null);
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false);
+
+  // Sync currentPage with location
+  useEffect(() => {
+    if (location.pathname.includes('/messages')) {
+      setCurrentPage('messages');
+    } else if (location.pathname.includes('/subscriptions')) {
+      setCurrentPage('subscriptions');
+    } else if (location.pathname.includes('/profile')) {
+      setCurrentPage('profile');
+    } else {
+      setCurrentPage('home');
+    }
+  }, [location.pathname]);
+
+  // Load creator from URL params when on messages page
+  useEffect(() => {
+    if (currentPage === 'messages' && searchParams.get('creator')) {
+      const creatorId = searchParams.get('creator');
+      if (creatorId && user) {
+        // Fetch creator details
+        import('@hype-loop/shared').then(({ supabase }) => {
+          supabase
+            .from('creators')
+            .select('id, display_name, username, bio')
+            .eq('id', creatorId)
+            .single()
+            .then(({ data: creatorData }) => {
+              if (creatorData) {
+                supabase
+                  .from('creator_profiles')
+                  .select('id, niche, profile_picture_url')
+                  .eq('id', creatorId)
+                  .single()
+                  .then(({ data: profile }) => {
+                    const colors = ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FBBF24', '#FB7185', '#34D399'];
+                    const colorIndex = parseInt(creatorId.slice(0, 2), 16) % colors.length;
+                    
+                    const creator: Creator = {
+                      id: creatorId,
+                      name: creatorData.display_name || 'Creator',
+                      username: creatorData.username || 'creator',
+                      tagline: creatorData.bio || '',
+                      price: 4.99,
+                      category: profile?.niche?.[0] || 'General',
+                      avatar: profile?.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(creatorData.display_name || 'Creator')}&background=random`,
+                      brandColor: colors[colorIndex],
+                    };
+                    setSelectedCreator(creator);
+                  });
+              }
+            });
+        });
+      }
+    }
+  }, [currentPage, searchParams, user]);
 
   const handleChatClick = async (creator: Creator) => {
     setSelectedCreator(creator);
@@ -150,6 +208,24 @@ function App() {
             element={
               <ProtectedRoute requireProfileComplete={true}>
                 <DashboardContent />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/dashboard/subscription-success"
+            element={
+              <ProtectedRoute requireProfileComplete={true}>
+                <SubscriptionSuccess />
+              </ProtectedRoute>
+            }
+          />
+          
+          <Route
+            path="/dashboard/subscription-cancel"
+            element={
+              <ProtectedRoute requireProfileComplete={true}>
+                <SubscriptionCancel />
               </ProtectedRoute>
             }
           />

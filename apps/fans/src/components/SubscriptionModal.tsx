@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check } from 'lucide-react';
-import { supabase } from '@hype-loop/shared';
+import { supabase, supabaseUrl, supabaseKey } from '@hype-loop/shared';
 import { useAuth } from '../contexts/AuthContext';
 import type { Creator } from './Home';
 
@@ -11,7 +11,7 @@ interface SubscriptionModalProps {
   onSubscribe: () => void;
 }
 
-export function SubscriptionModal({ creator, onClose, onSubscribe }: SubscriptionModalProps) {
+export function SubscriptionModal({ creator, onClose, onSubscribe: _onSubscribe }: SubscriptionModalProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,39 +33,43 @@ export function SubscriptionModal({ creator, onClose, onSubscribe }: Subscriptio
     setError(null);
 
     try {
-      // Create subscription
-      const { error: subscriptionError } = await supabase
-        .from('subscriptions')
-        .insert({
-          fan_id: user.id,
-          creator_id: creator.id,
-          tier: 'basic',
-          price_per_month: creator.price,
-          currency: 'USD',
-          status: 'active',
-        })
-        .select()
-        .single();
-
-      if (subscriptionError) {
-        // If subscription already exists, that's okay
-        if (subscriptionError.code === '23505') {
-          // Unique constraint violation - subscription already exists
-          console.log('Subscription already exists');
-        } else {
-          throw subscriptionError;
-        }
+      // Get Supabase session for auth token
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        throw new Error('You must be logged in to subscribe');
       }
 
-      // TODO: Integrate with Stripe for payment processing
-      // For now, we'll just create the subscription record
+      // Call Stripe checkout session endpoint
+      const response = await fetch(`${supabaseUrl}/functions/v1/create-checkout-session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+          'apikey': supabaseKey,
+        },
+        body: JSON.stringify({
+          creator_id: creator.id,
+          price_per_month: creator.price,
+          currency: 'USD',
+        }),
+      });
 
-      onSubscribe();
-      onClose();
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create checkout session');
+      }
+
+      // Redirect to Stripe checkout
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        throw new Error('No checkout URL received');
+      }
     } catch (err: any) {
       console.error('Error creating subscription:', err);
       setError(err.message || 'Failed to subscribe. Please try again.');
-    } finally {
       setLoading(false);
     }
   };

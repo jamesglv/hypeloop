@@ -37,11 +37,21 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
   const [creators, setCreators] = useState<Creator[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch chat history (creators user has messaged)
+  // Fetch chat history (creators user has messaged or subscribed to)
   useEffect(() => {
     if (!user) return;
 
     const fetchChatHistory = async () => {
+      // First, get all active subscriptions to get creator IDs
+      const { data: subscriptions } = await supabase
+        .from('subscriptions')
+        .select('creator_id, price_per_month')
+        .eq('fan_id', user.id)
+        .eq('status', 'active');
+
+      const subscriptionCreatorIds = subscriptions?.map(sub => sub.creator_id) || [];
+      const priceMap = new Map(subscriptions?.map(sub => [sub.creator_id, sub.price_per_month]) || []);
+
       // Get unique creator IDs from messages
       const { data: messagesData } = await supabase
         .from('messages')
@@ -49,22 +59,33 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
         .eq('fan_id', user.id)
         .order('created_at', { ascending: false });
 
-      if (!messagesData || messagesData.length === 0) return;
+      // Combine subscription creator IDs with message creator IDs
+      const allCreatorIds = new Set<string>();
+      subscriptionCreatorIds.forEach(id => allCreatorIds.add(id));
+      if (messagesData) {
+        messagesData.forEach(msg => {
+          if (msg.creator_id) allCreatorIds.add(msg.creator_id);
+        });
+      }
 
-      // Group by creator and get latest message
+      if (allCreatorIds.size === 0) return;
+
+      const creatorIds = Array.from(allCreatorIds);
+
+      // Group messages by creator and get latest message
       const creatorMap = new Map<string, { lastMessage: string; timestamp: Date }>();
       
-      messagesData.forEach((msg) => {
-        const creatorId = msg.creator_id;
-        if (!creatorMap.has(creatorId)) {
-          creatorMap.set(creatorId, {
-            lastMessage: msg.content,
-            timestamp: new Date(msg.created_at),
-          });
-        }
-      });
-
-      const creatorIds = Array.from(creatorMap.keys());
+      if (messagesData) {
+        messagesData.forEach((msg) => {
+          const creatorId = msg.creator_id;
+          if (creatorId && !creatorMap.has(creatorId)) {
+            creatorMap.set(creatorId, {
+              lastMessage: msg.content,
+              timestamp: new Date(msg.created_at),
+            });
+          }
+        });
+      }
 
       // Fetch creator details
       const { data: creatorsData } = await supabase
@@ -80,7 +101,8 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
       const history: ChatHistory[] = creatorIds.map((creatorId) => {
         const creatorData = creatorsData?.find((c) => c.id === creatorId);
         const profile = profilesData?.find((p) => p.id === creatorId);
-        const chatData = creatorMap.get(creatorId)!;
+        const chatData = creatorMap.get(creatorId);
+        const price = priceMap.get(creatorId) || 4.99;
 
         const colors = ['#FF6B6B', '#4ECDC4', '#A78BFA', '#FBBF24', '#FB7185', '#34D399'];
         const colorIndex = parseInt(creatorId.slice(0, 2), 16) % colors.length;
@@ -90,7 +112,7 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
           name: creatorData?.display_name || 'Creator',
           username: creatorData?.username || 'creator',
           tagline: creatorData?.bio || '',
-          price: 4.99,
+          price: typeof price === 'number' ? price : parseFloat(price),
           category: profile?.niche?.[0] || 'General',
           avatar: profile?.profile_picture_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(creatorData?.display_name || 'Creator')}&background=random`,
           brandColor: colors[colorIndex],
@@ -98,11 +120,14 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
 
         return {
           creatorId,
-          lastMessage: chatData.lastMessage,
-          timestamp: chatData.timestamp,
+          lastMessage: chatData?.lastMessage || 'Start a conversation',
+          timestamp: chatData?.timestamp || new Date(),
           creator,
         };
       });
+
+      // Sort by timestamp (most recent first)
+      history.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
 
       setChatHistory(history);
       setCreators(history.map((h) => h.creator));
@@ -145,7 +170,30 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
                 // Check if message already exists to prevent duplicates
                 const exists = prev.some(msg => msg.id === newMessage.id);
                 if (exists) return prev;
-                return [...prev, newMessage];
+                
+                // If this is a fan message from the current user, remove matching optimistic messages
+                if (newMessage.role === 'fan' && newMessage.fan_id === user?.id) {
+                  const newContent = newMessage.content.trim().toLowerCase();
+                  const filtered = prev.filter((msg) => {
+                    // Keep all non-optimistic messages
+                    if (!msg.id.startsWith('temp-')) return true;
+                    // Keep optimistic messages that aren't fan messages from this user
+                    if (msg.role !== 'fan' || msg.fan_id !== user?.id) return true;
+                    
+                    // Remove optimistic messages that match by content (case-insensitive, trimmed)
+                    const msgContent = msg.content.trim().toLowerCase();
+                    return msgContent !== newContent;
+                  });
+                  // Add the real message and sort by created_at to maintain chronological order
+                  return [...filtered, newMessage].sort(
+                    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                  );
+                }
+                
+                // For AI messages, just add and sort
+                return [...prev, newMessage].sort(
+                  (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+                );
               });
             }
           }
@@ -221,6 +269,20 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
     setInputValue('');
     setLoading(true);
 
+    // Create optimistic message with temporary ID
+    const optimisticMessageId = `temp-${Date.now()}-${Math.random()}`;
+    const optimisticMessage: Message = {
+      id: optimisticMessageId,
+      content: messageContent,
+      role: 'fan',
+      created_at: new Date().toISOString(),
+      fan_id: user.id,
+      creator_id: activeCreatorId,
+    };
+
+    // Immediately add the fan's message to the UI (optimistic update)
+    setMessages((prev) => [...prev, optimisticMessage]);
+
     try {
       // Call edge function to generate AI response
       // The edge function will insert both the fan message and AI response
@@ -239,14 +301,21 @@ export function ChatInterface({ selectedCreator, onSelectCreator }: ChatInterfac
 
       if (aiError) {
         console.error('Error generating AI response:', aiError);
+        // Remove optimistic message on error
+        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessageId));
         // Restore message on error
         setInputValue(messageContent);
+        setLoading(false);
+        return;
       }
 
-      // Don't need to refresh - realtime subscription will handle new messages
+      // The realtime subscription will handle adding the real messages
+      // and removing the optimistic message when the real one arrives
       setLoading(false);
     } catch (error) {
       console.error('Error sending message:', error);
+      // Remove optimistic message on error
+      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticMessageId));
       // Restore message on error
       setInputValue(messageContent);
       setLoading(false);

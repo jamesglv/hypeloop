@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import Stripe from 'https://esm.sh/stripe@14.21.0?target=deno'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -22,6 +23,13 @@ serve(async (req) => {
         }
       }
     )
+
+    // Initialize Stripe if needed
+    const stripeSecretKey = Deno.env.get('STRIPE_SECRET_KEY')
+    const stripe = stripeSecretKey ? new Stripe(stripeSecretKey, {
+      apiVersion: '2024-11-20.acacia',
+      httpClient: Stripe.createFetchHttpClient(),
+    }) : null
 
     const { action, fan_id, creator_id, subscription_id, tier, price_per_month } = await req.json()
 
@@ -104,7 +112,37 @@ serve(async (req) => {
         )
       }
 
-      const { data: subscription, error } = await supabaseClient
+      // Get subscription to check if it has Stripe subscription
+      const { data: subscription, error: fetchError } = await supabaseClient
+        .from('subscriptions')
+        .select('stripe_subscription_id')
+        .eq('id', subscription_id)
+        .single()
+
+      if (fetchError) {
+        return new Response(
+          JSON.stringify({ error: fetchError.message }),
+          { 
+            status: 500,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        )
+      }
+
+      // Cancel in Stripe if subscription exists
+      if (subscription.stripe_subscription_id && stripe) {
+        try {
+          await stripe.subscriptions.update(subscription.stripe_subscription_id, {
+            cancel_at_period_end: true,
+          })
+        } catch (stripeError) {
+          console.error('Error canceling Stripe subscription:', stripeError)
+          // Continue with database update even if Stripe fails
+        }
+      }
+
+      // Update subscription in database
+      const { data: updatedSubscription, error } = await supabaseClient
         .from('subscriptions')
         .update({
           status: 'canceled',
@@ -125,7 +163,7 @@ serve(async (req) => {
       }
 
       return new Response(
-        JSON.stringify({ subscription }),
+        JSON.stringify({ subscription: updatedSubscription }),
         { 
           status: 200,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
