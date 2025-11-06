@@ -4,6 +4,7 @@ import { Card } from '../components/ui/card';
 import { Users, TrendingUp, MessageSquare, DollarSign, ArrowUp, ArrowDown } from 'lucide-react';
 import { supabase } from '@hype-loop/shared';
 import { useAuth } from '../contexts/AuthContext';
+import { TrainingTopicsModal } from '../components/TrainingTopicsModal';
 
 interface FanInteraction {
   name: string;
@@ -19,6 +20,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const [fanInteractions, setFanInteractions] = useState<FanInteraction[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedTopic, setSelectedTopic] = useState<{ topic: string; icon: string; questions: string[] } | null>(null);
 
   const metrics = [
     { label: 'Subscribers', value: '1,238', icon: Users, trend: 'up', trendValue: '+12%' },
@@ -168,12 +170,69 @@ export default function Dashboard() {
     };
   }, [user]);
 
+  const topicQuestions: Record<string, string[]> = {
+    'Morning Routines & Productivity': [
+      'What time do you wake up every morning?',
+      'What is the first thing you do when you wake up?',
+      'Do you have a morning meditation or mindfulness practice?',
+      'What does your ideal morning routine look like?',
+      'How do you stay productive throughout the day?',
+      'What breakfast do you typically have?',
+      'Do you exercise in the morning? If so, what type?',
+      'How do you plan your day ahead?',
+      'What tools or apps do you use for productivity?',
+      'How do you handle morning distractions?',
+      'What habits have had the biggest impact on your morning routine?',
+      'How do you maintain consistency with your morning routine?',
+    ],
+    'Equipment & Gear Recommendations': [
+      'What camera do you use for filming?',
+      'What lighting setup do you recommend?',
+      'What microphone do you use for audio?',
+      'What editing software do you use?',
+      'What tripod or stabilizer do you recommend?',
+      'What storage solution do you use for your footage?',
+      'What computer specs do you need for video editing?',
+      'What accessories have made the biggest difference in your content creation?',
+    ],
+    'Motivation & Mental Health': [
+      'How do you stay motivated on days when you don\'t feel like creating?',
+      'What do you do when you experience creative burnout?',
+      'How do you handle negative comments or criticism?',
+      'What mental health practices do you follow?',
+      'How do you balance work and personal life?',
+      'What keeps you going during difficult times?',
+      'How do you deal with imposter syndrome?',
+      'What advice do you have for overcoming fear of failure?',
+      'How do you maintain a positive mindset?',
+      'What self-care routines do you practice?',
+      'How do you handle stress and anxiety?',
+      'What books or resources have helped your mental health?',
+      'How do you set boundaries with your audience?',
+      'What role does community play in your mental health?',
+      'How do you celebrate small wins and progress?',
+    ],
+    'Content Strategy & Growth': [
+      'How do you come up with content ideas?',
+      'What posting schedule do you recommend?',
+      'How do you analyze what content performs best?',
+      'What strategies have helped you grow your audience?',
+      'How do you engage with your community?',
+      'What platforms do you focus on and why?',
+    ],
+  };
+
   const suggestedTopics = [
     { topic: 'Morning Routines & Productivity', questions: 12, icon: '☀️' },
     { topic: 'Equipment & Gear Recommendations', questions: 8, icon: '📹' },
     { topic: 'Motivation & Mental Health', questions: 15, icon: '💪' },
     { topic: 'Content Strategy & Growth', questions: 6, icon: '📈' },
   ];
+
+  const handleTopicClick = (topic: string, icon: string) => {
+    const questions = topicQuestions[topic] || [];
+    setSelectedTopic({ topic, icon, questions });
+  };
 
   return (
     <div className="space-y-6">
@@ -257,6 +316,7 @@ export default function Dashboard() {
           {suggestedTopics.map((item, index) => (
             <div 
               key={index} 
+              onClick={() => handleTopicClick(item.topic, item.icon)}
               className="p-4 rounded-xl bg-gradient-to-br from-[#7A5FFF]/5 to-[#A689FF]/5 border border-[#7A5FFF]/20 hover:border-[#7A5FFF]/40 transition-colors cursor-pointer"
             >
               <div className="text-3xl mb-2">{item.icon}</div>
@@ -266,6 +326,17 @@ export default function Dashboard() {
           ))}
         </div>
       </Card>
+
+      {/* Training Topics Modal */}
+      {selectedTopic && (
+        <TrainingTopicsModal
+          isOpen={!!selectedTopic}
+          onClose={() => setSelectedTopic(null)}
+          topic={selectedTopic.topic}
+          icon={selectedTopic.icon}
+          questions={selectedTopic.questions}
+        />
+      )}
     </div>
   );
 }

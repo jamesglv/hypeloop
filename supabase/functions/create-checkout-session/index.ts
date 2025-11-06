@@ -211,7 +211,7 @@ serve(async (req) => {
           price_data: {
             currency: currency.toLowerCase(),
             product_data: {
-              name: `Subscribe to ${creator.display_name}'s Brain`,
+              name: `Subscribe to ${creator.display_name}`,
               description: `Monthly subscription to chat with ${creator.display_name}'s AI`,
             },
             unit_amount: Math.round(price_per_month * 100), // Convert to cents

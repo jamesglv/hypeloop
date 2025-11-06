@@ -130,7 +130,7 @@ export function SubscriptionModal({ creator, onClose, onSubscribe: _onSubscribe 
 
             {/* Title */}
             <h2 className="text-foreground mb-2 text-xl font-medium">
-              Subscribe to {creatorFirstName}'s Brain
+              Subscribe to {creatorFirstName}
             </h2>
 
             {/* Price */}

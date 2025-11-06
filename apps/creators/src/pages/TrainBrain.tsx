@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Card } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Mic, Check, Sparkles, MessageSquare, User, Smile, GraduationCap, BookOpen, Users } from 'lucide-react';
+import { Check, Sparkles, MessageSquare, User, Smile, GraduationCap, BookOpen, Users } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Slider } from '../components/ui/slider';
 import { supabase } from '@hype-loop/shared';
@@ -22,7 +22,6 @@ interface PillarData {
 export default function TrainBrain() {
   const { user } = useAuth();
   const [activePillar, setActivePillar] = useState('voice');
-  const [isRecording, setIsRecording] = useState<number | null>(null);
   const [testMessage, setTestMessage] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -320,16 +319,6 @@ export default function TrainBrain() {
     saveToDatabase(1000);
   };
 
-  const handleMicClick = (index: number) => {
-    setIsRecording(index);
-    // Simulate recording
-    setTimeout(() => {
-      const sampleTranscription = "I keep things real and energetic. No sugar coating, just straight talk that gets people moving!";
-      handleAnswerChange(index, sampleTranscription);
-      setIsRecording(null);
-    }, 2000);
-  };
-
   const generateSampleReply = () => {
     const samples = [
       "Morning routine? Let's go! I kick off every day with a 20-min workout, cold shower, and black coffee. No excuses. It's all about discipline, not waiting for motivation to show up! 💪",
@@ -432,35 +421,13 @@ export default function TrainBrain() {
                   <div className="flex items-start justify-between mb-2">
                     <div className="flex-1">
                       <div className="text-sm text-gray-700 mb-3">{q.question}</div>
-                      <div className="relative">
-                        <textarea
-                          value={q.answer}
-                          onChange={(e) => handleAnswerChange(index, e.target.value)}
-                          placeholder={q.placeholder}
-                          rows={3}
-                          className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7A5FFF] resize-none"
-                        />
-                        <button
-                          onClick={() => handleMicClick(index)}
-                          className={`absolute bottom-3 right-3 p-2 rounded-lg transition-colors ${
-                            isRecording === index
-                              ? 'bg-red-500 text-white animate-pulse'
-                              : 'bg-gray-100 text-gray-600 hover:bg-[#7A5FFF] hover:text-white'
-                          }`}
-                        >
-                          <Mic className="w-4 h-4" />
-                        </button>
-                      </div>
-                      {isRecording === index && (
-                        <div className="flex items-center gap-2 mt-2 text-sm text-red-600">
-                          <div className="flex gap-1">
-                            <div className="w-1 h-3 bg-red-600 rounded animate-pulse"></div>
-                            <div className="w-1 h-4 bg-red-600 rounded animate-pulse delay-75"></div>
-                            <div className="w-1 h-3 bg-red-600 rounded animate-pulse delay-150"></div>
-                          </div>
-                          <span>Listening…</span>
-                        </div>
-                      )}
+                      <textarea
+                        value={q.answer}
+                        onChange={(e) => handleAnswerChange(index, e.target.value)}
+                        placeholder={q.placeholder}
+                        rows={3}
+                        className="w-full px-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#7A5FFF] resize-none"
+                      />
                     </div>
                     {q.answer.trim() && (
                       <div className="ml-3 mt-1">
